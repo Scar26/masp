@@ -10,6 +10,10 @@ pub struct AllowedConversion {
 }
 
 impl AllowedConversion {
+    pub fn new(assets: Vec<(AssetType, i64)>) -> Self {
+        Self {assets}
+    }
+
     pub fn uncommitted() -> bls12_381::Scalar {
         // The smallest u-coordinate that is not on the curve
         // is one.
