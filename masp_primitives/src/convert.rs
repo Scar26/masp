@@ -2,16 +2,25 @@ use crate::asset_type::AssetType;
 use crate::pedersen_hash::{pedersen_hash, Personalization};
 use crate::primitives::ValueCommitment;
 use group::{Curve, GroupEncoding};
+use std::collections::BTreeMap;
+use std::ops::AddAssign;
+
+const COIN: i64 = 1_0000_0000;
+const MAX_MONEY: i64 = 21_000_000 * COIN;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AllowedConversion {
     /// The asset type that the note represents
-    pub assets: Vec<(AssetType, i64)>,
+    pub assets: BTreeMap<AssetType, i64>,
 }
 
 impl AllowedConversion {
-    pub fn new(assets: Vec<(AssetType, i64)>) -> Self {
-        Self {assets}
+    pub fn new(values: Vec<(AssetType, i64)>) -> Self {
+        let mut assets = BTreeMap::new();
+        for (atype, v) in values {
+            assets.insert(atype, v);
+        }
+        Self { assets }
     }
 
     pub fn uncommitted() -> bls12_381::Scalar {
@@ -83,5 +92,22 @@ impl AllowedConversion {
             value,
             randomness,
         }
+    }
+}
+
+impl AddAssign for AllowedConversion {
+    fn add_assign(&mut self, rhs: Self) {
+        let mut ret = self.clone();
+        for (atype, amount) in rhs.assets.iter() {
+            let ent = ret.assets[atype] + amount;
+            if ent == 0 {
+                ret.assets.remove(atype);
+            } else if -MAX_MONEY <= ent && ent <= MAX_MONEY {
+                ret.assets.insert(*atype, ent);
+            } else {
+                panic!("addition should remain in range");
+            }
+        }
+        *self = ret;
     }
 }

@@ -7,11 +7,26 @@ use crate::{
 };
 use blake2s_simd::Params as Blake2sParams;
 use group::{cofactor::CofactorGroup, Group, GroupEncoding};
+use std::cmp::Ordering;
+use borsh::{BorshSerialize, BorshDeserialize};
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug)]
+#[derive(Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, Eq)]
 pub struct AssetType {
     identifier: [u8; ASSET_IDENTIFIER_LENGTH], //32 byte asset type preimage
     nonce: Option<u8>,
+}
+
+impl PartialOrd for AssetType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.get_identifier().partial_cmp(other.get_identifier())
+    }
+}
+
+impl Ord for AssetType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.get_identifier().cmp(other.get_identifier())
+    }
 }
 
 // Abstract type representing an asset
