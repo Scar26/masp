@@ -40,7 +40,7 @@ pub fn default_fee() -> Amount {
 #[derive(
     Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize, Serialize, Deserialize, Eq, Hash
 )]
-pub struct Amount(BTreeMap<AssetType, i64>);
+pub struct Amount(pub(crate) BTreeMap<AssetType, i64>);
 
 impl Amount {
     /// Returns a zero-valued Amount.
@@ -266,15 +266,10 @@ impl Sum for Amount {
 
 impl From<AllowedConversion> for Amount {
     fn from(conv: AllowedConversion) -> Amount {
-        Amount(conv.assets)
+        conv.assets
     }
 }
 
-impl Into<AllowedConversion> for Amount {
-    fn into(self) -> AllowedConversion {
-        AllowedConversion { assets: self.0 }
-    }
-}
 
 #[cfg(test)]
 mod tests {
