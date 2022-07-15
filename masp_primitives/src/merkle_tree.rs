@@ -16,7 +16,7 @@ use std::{thread};
 use std::sync::Arc;
 use rayon;
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::sapling::Node;
 
 struct PathFiller<Node: Hashable> {
@@ -78,7 +78,7 @@ impl FrozenCommitmentTree<Node> {
         (layers[h-1] + 2*p, layers[h-1] + 2*p + 1)
     }
 
-    fn worker(r: Receiver<Coordinate>, s: Sender<Coordinate>, tree: Arc<UnsafeVec<Node>>, layers: Vec<usize>, done: Arc<AtomicBool>, computed: Arc<Vec<AtomicU8>>) {
+    fn worker(r: Receiver<Coordinate>, s: Sender<Coordinate>, tree: Arc<UnsafeVec<Node>>, layers: Vec<usize>, done: Arc<AtomicBool>, computable: Arc<Vec<AtomicBool>>) {
         let empty = Node::default();
         for (h, i) in r {
             if done.load(Ordering::Relaxed) {
@@ -97,16 +97,16 @@ impl FrozenCommitmentTree<Node> {
             if h == SAPLING_COMMITMENT_TREE_DEPTH {
                 done.store(true, Ordering::Relaxed);
                 for _ in 0..rayon::current_num_threads() {
-                    let _  = s.send((0, 0)).unwrap();   
+                    let _ = s.send((0, 0)).unwrap();   
                 }
                 break;
             }
             
             let p = Self::parent((h, i), &layers).1;
-            let status = computed[p].fetch_add(1, Ordering::Release);
+            let status = computable[p].fetch_or(true, Ordering::Release);
 
-            if status == 1 {
-                let _  = s.send(Self::parent((h, i), &layers)).unwrap();
+            if status {
+                let _ = s.send(Self::parent((h, i), &layers)).unwrap();
             }
         }
     }
@@ -129,7 +129,7 @@ impl FrozenCommitmentTree<Node> {
         let  n = layers[SAPLING_COMMITMENT_TREE_DEPTH] + 1;
         let empty_node = Node::default();
         let mut tree: Vec<Node> = vec![empty_node; n];
-        let computed: Vec<AtomicU8> = (0..n).map(|_| AtomicU8::new(0)).collect();
+        let computable: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
         
         // populate leaf nodes
         for i in 0..l {
@@ -144,7 +144,8 @@ impl FrozenCommitmentTree<Node> {
                 width += 1;
                 if start + width <= n {
                     tree[start + width - 1] = Node::empty_root(height);
-                    computed[Self::parent((height, start + width - 1), &layers).1].store(1, Ordering::Relaxed);
+                    // Update parent ndoe of empty root
+                    computable[Self::parent((height, start + width - 1), &layers).1].store(true, Ordering::Relaxed);
                 }
             }
             start += width;
@@ -153,7 +154,7 @@ impl FrozenCommitmentTree<Node> {
 
         let tree = Arc::new(UnsafeVec::new(tree));
         let done = Arc::new(AtomicBool::new(false));
-        let computed = Arc::new(computed);
+        let computable = Arc::new(computable);
 
         // Start worker threads
         let num_threads = rayon::current_num_threads();
@@ -166,7 +167,7 @@ impl FrozenCommitmentTree<Node> {
         };
 
         for i in layers[1]..e {
-            let _  = s.send((1, i)).unwrap();
+            let _ = s.send((1, i)).unwrap();
         }
 
         let handles: Vec<thread::JoinHandle<()>> = (0..num_threads)
@@ -176,7 +177,7 @@ impl FrozenCommitmentTree<Node> {
             let tc = tree.clone();
             let lc = layers.clone();
             let dc = done.clone();
-            let cc = computed.clone();
+            let cc = computable.clone();
             thread::spawn(move || Self::worker(tr, ts, tc, lc, dc, cc))
         })
         .collect();
@@ -915,50 +916,31 @@ mod tests {
     }
 
     #[test]
-    // fn test_frozen_tree() {
-    //     let commitments = [
-    //         "b02310f2e087e55bfd07ef5e242e3b87ee5d00c9ab52f61e6bd42542f93a6f55",
-    //         "225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b11458",
-    //         "7c3ea01a6e3a3d90cf59cd789e467044b5cd78eb2c84cc6816f960746d0e036c",
-    //         "50421d6c2c94571dfaaa135a4ff15bf916681ebd62c0e43e69e3b90684d0a030",
-    //         "aaec63863aaa0b2e3b8009429bdddd455e59be6f40ccab887a32eb98723efc12",
-    //         "f76748d40d5ee5f9a608512e7954dd515f86e8f6d009141c89163de1cf351a02",
-    //         "bc8a5ec71647415c380203b681f7717366f3501661512225b6dc3e121efc0b2e",
-    //         "da1adda2ccde9381e11151686c121e7f52d19a990439161c7eb5a9f94be5a511",
-    //         "3a27fed5dbbc475d3880360e38638c882fd9b273b618fc433106896083f77446",
-    //         "c7ca8f7df8fd997931d33985d935ee2d696856cc09cc516d419ea6365f163008",
-    //         "f0fa37e8063b139d342246142fc48e7c0c50d0a62c97768589e06466742c3702",
-    //         "e6d4d7685894d01b32f7e081ab188930be6c2b9f76d6847b7f382e3dddd7c608",
-    //         "8cebb73be883466d18d3b0c06990520e80b936440a2c9fd184d92a1f06c4e826",
-    //         "22fab8bcdb88154dbf5877ad1e2d7f1b541bc8a5ec1b52266095381339c27c03",
-    //         "f43e3aac61e5a753062d4d0508c26ceaf5e4c0c58ba3c956e104b5d2cf67c41c",
-    //         "3a3661bc12b72646c94bc6c92796e81953985ee62d80a9ec3645a9a95740ac15",
-    //     ];
-    //     for right in 8..16 {
-    //         let mut orig = CommitmentTree::empty();
-    //         let mut cmus = Vec::new();
-    //         let mut paths:Vec<IncrementalWitness<Node>> = Vec::new();
-    //         for i in 0..right {
-    //             let cmu = hex::decode(commitments[i]).unwrap();
-    //             let cmu = Node::new(cmu[..].try_into().unwrap());
-    //             orig.append(cmu).unwrap();
-    //             cmus.push(cmu);
-    //             for path in &mut paths {
-    //                 path.append(cmu).unwrap();
-    //             }
-    //             paths.push(IncrementalWitness::from_tree(&orig));
-    //         }
-    //         let frozen1 = FrozenCommitmentTree::new(&cmus[0..8]);
-    //         let frozen2 = FrozenCommitmentTree::new(&cmus[8..right]);
-    //         let frozen = FrozenCommitmentTree::merge(&[frozen1, frozen2]);
-    //         assert_eq!(orig.root(), frozen.root());
-    //         for (i, path) in paths.iter().enumerate() {
-    //             let path = path.path().unwrap();
-    //             assert_eq!(path.auth_path, frozen.path(i).auth_path);
-    //             assert_eq!(path.position, frozen.path(i).position);
-    //         }
-    //     }
-    // }
+    fn test_frozen_tree() {
+        use rand::rngs::OsRng;
+        use rand::RngCore;
+        let mut orig = CommitmentTree::empty();
+        let mut cmus = Vec::new();
+        let mut paths:Vec<IncrementalWitness<Node>> = Vec::new();
+        for _ in 0..100 {
+            let mut cmu = [0; 32];
+            OsRng.fill_bytes(&mut cmu);
+            let cmu = Node::new(cmu);
+            orig.append(cmu).unwrap();
+            cmus.push(cmu);
+            for path in &mut paths {
+                path.append(cmu).unwrap();
+            }
+            paths.push(IncrementalWitness::from_tree(&orig));
+        }
+        let frozen = FrozenCommitmentTree::new(&cmus[..]).unwrap();
+        assert_eq!(orig.root(), frozen.root());
+        for (i, path) in paths.iter().enumerate() {
+            let path = path.path().unwrap();
+            assert_eq!(path.auth_path, frozen.path(i).auth_path);
+            assert_eq!(path.position, frozen.path(i).position);
+        }
+    }
 
     #[test]
     fn test_sapling_tree() {
